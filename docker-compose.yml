@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  coach:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    restart: unless-stopped
+    networks:
+      - coach_net
+
+  # ── Optional: run Ollama locally in Docker (uncomment to use) ──
+  # ollama:
+  #   image: ollama/ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   restart: unless-stopped
+  #   networks:
+  #     - coach_net
+
+networks:
+  coach_net:
+    driver: bridge
+
+# volumes:
+#   ollama_data:

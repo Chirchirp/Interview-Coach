@@ -1,0 +1,16 @@
+# Interview Coach AI — Dependencies
+# Install: pip install -r requirements.txt
+
+# ── Core ─────────────────────────────────────────────────────────
+streamlit>=1.32.0
+
+# ── AI Providers ─────────────────────────────────────────────────
+openai>=1.14.0        # Groq, OpenRouter, Together, Ollama (all OpenAI-compatible)
+anthropic>=0.18.0     # Claude models (optional)
+
+# ── File Parsing ─────────────────────────────────────────────────
+pypdf>=4.1.0          # PDF text extraction
+python-docx>=1.1.0    # DOCX text extraction
+
+# ── Utilities ────────────────────────────────────────────────────
+python-dotenv>=1.0.0  # Optional .env support

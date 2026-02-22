@@ -305,7 +305,7 @@ def build_session_plan(api_key, provider, model, resume_text, jd_text) -> dict:
         '"key_gaps":["<gap>","<gap>","<gap>"],'
         '"opening_message":"<2-3 warm sentences welcoming candidate by name>",'
         '"question_pool":['
-        '{"id":1,"category":"Opener","question":"<warm opener>","what_great_looks_like":"<1 sentence>","difficulty":"Easy"},'
+        '{"id":1,"category":"Opener","question":"Tell me about yourself.","what_great_looks_like":"Past→present→future narrative: education + key experience + specific reason for wanting THIS role. 60-90 seconds. Not a CV recitation.","difficulty":"Easy"},'
         '{"id":2,"category":"Behavioral","question":"<STAR question from experience>","what_great_looks_like":"<1 sentence>","difficulty":"Medium"},'
         '{"id":3,"category":"Behavioral","question":"<challenge/failure question>","what_great_looks_like":"<1 sentence>","difficulty":"Medium"},'
         '{"id":4,"category":"Technical","question":"<role-specific technical question>","what_great_looks_like":"<1 sentence>","difficulty":"Medium"},'
@@ -314,7 +314,7 @@ def build_session_plan(api_key, provider, model, resume_text, jd_text) -> dict:
         '{"id":7,"category":"Leadership","question":"<influence or team question>","what_great_looks_like":"<1 sentence>","difficulty":"Medium"},'
         '{"id":8,"category":"Culture Fit","question":"<values or motivation question>","what_great_looks_like":"<1 sentence>","difficulty":"Easy"},'
         '{"id":9,"category":"Gap Challenge","question":"<probes weakest gap>","what_great_looks_like":"<1 sentence>","difficulty":"Hard"},'
-        '{"id":10,"category":"Closing","question":"Do you have any questions for me?","what_great_looks_like":"Ask 2 thoughtful questions","difficulty":"Easy"}'
+        '{"id":10,"category":"Closing","question":"Do you have any questions for me?","what_great_looks_like":"2-3 specific questions showing role knowledge, company research, and strategic thinking. Never ask about salary or basic facts you could Google.","difficulty":"Easy"}'
         ']}'
         + _brevity(provider, 40) +
         '\n\nRESUME:\n' + resume_ctx +
@@ -348,7 +348,7 @@ def build_field_plan(api_key, provider, model, field,
         '"key_gaps":["Tailor to ' + field + ' context","Quantify impact","Be specific"],'
         '"opening_message":"<2-3 warm sentences for a ' + experience_level + ' ' + field + ' candidate>",'
         '"question_pool":['
-        '{"id":1,"category":"Opener","question":"Tell me about yourself and what draws you to ' + field + '.","what_great_looks_like":"90-second story with key value","difficulty":"Easy"},'
+        '{"id":1,"category":"Opener","question":"Tell me about yourself and what draws you to ' + field + '.","what_great_looks_like":"Past→present→future narrative. Specific, genuine reason for wanting THIS role in ' + field + '. 60-90 seconds. Not a CV recitation.","difficulty":"Easy"},'
         '{"id":2,"category":"Behavioral","question":"<STAR behavioral for ' + field + ' at ' + experience_level + '>","what_great_looks_like":"Specific example with result","difficulty":"Medium"},'
         '{"id":3,"category":"Behavioral","question":"<challenge question for ' + field + '>","what_great_looks_like":"Shows self-awareness","difficulty":"Medium"},'
         '{"id":4,"category":"Technical","question":"<core technical question for ' + field + '>","what_great_looks_like":"Clear explanation with example","difficulty":"Medium"},'
@@ -357,7 +357,7 @@ def build_field_plan(api_key, provider, model, field,
         '{"id":7,"category":"Leadership","question":"<collaboration question for ' + experience_level + ' ' + field + '>","what_great_looks_like":"Shows impact on others","difficulty":"Medium"},'
         '{"id":8,"category":"Culture Fit","question":"What work environment brings out your best?","what_great_looks_like":"Authentic and specific","difficulty":"Easy"},'
         '{"id":9,"category":"Motivation","question":"<career goals for ' + field + '>","what_great_looks_like":"Forward-looking and genuine","difficulty":"Easy"},'
-        '{"id":10,"category":"Closing","question":"Do you have any questions for me?","what_great_looks_like":"Ask 2 thoughtful researched questions","difficulty":"Easy"}'
+        '{"id":10,"category":"Closing","question":"Do you have any questions for me?","what_great_looks_like":"2-3 sharp questions: one about real role challenges, one about team/success metrics, one about strategic direction. No salary questions.","difficulty":"Easy"}'
         ']}'
         + _brevity(provider, 40) +
         '\n\nFIELD: ' + field +
@@ -374,103 +374,275 @@ def build_field_plan(api_key, provider, model, field,
 # ═══════════════════════════════════════════════════════════════════
 # 2. GRADE ANSWER  ←  core change in v4
 # ═══════════════════════════════════════════════════════════════════
+# ── Grading rubric definitions per category type ─────────────────
+# "opener"  → Tell me about yourself style: no STAR, assess narrative arc
+# "closing" → Candidate questions: assess relevance, insight, preparation
+# "star"    → All other categories: full STAR rubric
+
+def _category_type(category: str) -> str:
+    c = category.lower()
+    if c in ("opener",):
+        return "opener"
+    if c in ("closing",):
+        return "closing"
+    return "star"
+
+
+def _opener_rubric_scores() -> str:
+    """JSON fields for Opener grading — replaces star_scores with narrative dimensions."""
+    return (
+        '  "rubric_scores": {\n'
+        '    "narrative_arc": <0-25 — clear past→present→future story>,\n'
+        '    "relevant_experience": <0-25 — education and work experience match the role>,\n'
+        '    "motivation_fit": <0-25 — genuine, specific reason for wanting THIS role>,\n'
+        '    "delivery_confidence": <0-25 — concise, engaging, not too long or too short>\n'
+        '  },\n'
+        '  "rubric_labels": ["Narrative Arc","Relevant Experience","Motivation & Fit","Delivery & Confidence"],\n'
+    )
+
+
+def _closing_rubric_scores() -> str:
+    """JSON fields for Closing grading — replaces star_scores with question quality dimensions."""
+    return (
+        '  "rubric_scores": {\n'
+        '    "role_relevance": <0-25 — question shows real understanding of the role>,\n'
+        '    "company_research": <0-25 — shows candidate researched the company or team>,\n'
+        '    "strategic_thinking": <0-25 — question reveals forward-thinking or growth mindset>,\n'
+        '    "interview_intelligence": <0-25 — not a basic/googelable question; shows exec presence>\n'
+        '  },\n'
+        '  "rubric_labels": ["Role Relevance","Company Research","Strategic Thinking","Interview Intelligence"],\n'
+    )
+
+
+def _star_rubric_scores() -> str:
+    """JSON fields for standard STAR grading."""
+    return (
+        '  "rubric_scores": {\n'
+        '    "situation": <0-25 — context was clear and relevant>,\n'
+        '    "task": <0-25 — your specific role/responsibility was defined>,\n'
+        '    "action": <0-25 — concrete steps YOU took, not the team>,\n'
+        '    "result": <0-25 — quantified or observable outcome stated>\n'
+        '  },\n'
+        '  "rubric_labels": ["Situation","Task","Action","Result"],\n'
+    )
+
+
+def _opener_system() -> str:
+    return (
+        "You are Alex, a senior HR director and interview coach with 15+ years placing "
+        "candidates at top companies. When evaluating a \'Tell me about yourself\' answer, "
+        "you assess four things like an experienced recruiter would: \n"
+        "1. NARRATIVE ARC — Does it flow naturally from background → experience → now → why here? "
+        "Is it a compelling 60-90 second story, not a CV recitation?\n"
+        "2. RELEVANT EXPERIENCE — Does the candidate connect their education and work history "
+        "to what this role needs? Do they pick the right highlights?\n"
+        "3. MOTIVATION & FIT — Is the reason for wanting THIS role genuine and specific? "
+        "'I love data' is weak. 'This role sits at the intersection of analytics and product "
+        "decisions, which is where I\'ve done my best work' is strong.\n"
+        "4. DELIVERY & CONFIDENCE — Is it concise? Does it land with energy? "
+        "Does it make the interviewer want to hear more?\n\n"
+        "When you write the model_answer, write it as a warm, confident first-person pitch "
+        "that flows naturally — not a script, not bullet points. "
+        "Return ONLY valid JSON. No markdown. No extra text."
+    )
+
+
+def _closing_system() -> str:
+    return (
+        "You are Alex, a senior hiring manager and interview coach. When evaluating "
+        "\'Do you have any questions for me?\', you assess like an experienced interviewer would.\n\n"
+        "WHAT GREAT LOOKS LIKE:\n"
+        "- 2-3 thoughtful, specific questions that show the candidate has done their homework\n"
+        "- Questions about the role\'s real challenges, team dynamics, success metrics, or strategic direction\n"
+        "- NOT: salary, holiday, hours (too early), or basic facts findable on Google\n"
+        "- The best candidates use this as a conversation — they reference something from the interview\n\n"
+        "WHAT WEAK LOOKS LIKE:\n"
+        "- 'I think you\'ve covered everything' — instant red flag\n"
+        "- Generic questions like 'What does a typical day look like?' with no follow-through\n"
+        "- Questions that make the interviewer feel interrogated rather than engaged\n\n"
+        "When you write the model_answer, write 2-3 specific, intelligent questions "
+        "the candidate would actually ask, with a brief setup for each that shows context. "
+        "Return ONLY valid JSON. No markdown. No extra text."
+    )
+
+
+def _star_system() -> str:
+    return (
+        "You are Alex, a senior interview coach and technical hiring manager with 15 years "
+        "placing candidates at top companies. You know exactly what separates a 100-point "
+        "answer from a 60-point one. You are warm, direct, and always specific — never generic.\n\n"
+        "When you write a model_answer, you write it as if YOU are the candidate — "
+        "speaking naturally in the first person, the way a confident person actually talks "
+        "in an interview room. The model_answer must:\n"
+        "- Be first person (I, me, my) — conversational, not labelled\n"
+        "- Follow STAR naturally without announcing the sections\n"
+        "- Include a specific, believable scenario with real-feeling context\n"
+        "- Name concrete actions, tools, decisions, or methods\n"
+        "- End with a quantified or observable result\n"
+        "- Be 5-8 sentences — complete but not rehearsed-sounding\n"
+        "- Use the candidate\'s resume background to personalise it\n\n"
+        "Return ONLY valid JSON. No markdown. No extra text."
+    )
+
+
+def _opener_prompt_fields() -> str:
+    return (
+        '  "model_answer": "<Write a compelling, natural first-person \'tell me about yourself\' pitch. '
+        'It should flow: brief origin/education → key experience highlights relevant to the role → '
+        'what you are doing now or most recently → a specific genuine reason for wanting THIS role. '
+        '60-90 seconds when spoken aloud. Warm, confident, not a CV recitation. '
+        'Use the candidate\'s background to make it real. No bullet points.>",\n'
+        '  "model_answer_breakdown": "<3-4 sentences explaining exactly why this pitch would land well. '
+        'What narrative choices were made? Why does the motivation statement work? '
+        'What does the interviewer feel after hearing it? Teach the structure.>",\n'
+    )
+
+
+def _closing_prompt_fields() -> str:
+    return (
+        '  "model_answer": "<Write 2-3 specific, intelligent questions the candidate should ask, '
+        'each with a 1-sentence setup showing context. Make them feel genuinely curious and prepared — '
+        'not just ticking a box. Vary them: one about the role challenges, one about team/culture, '
+        'one about success metrics or strategy. Write them as the candidate would say them out loud.>",\n'
+        '  "model_answer_breakdown": "<3-4 sentences explaining why these questions create a strong '
+        'final impression. What do they signal to the interviewer? Why are specificity and research '
+        'visible in them? What would a weak version of these questions look like?  Teach the pattern.>",\n'
+    )
+
+
+def _star_prompt_fields() -> str:
+    return (
+        '  "model_answer": "<Write the complete answer as if you ARE the candidate speaking '
+        'right now. First person. Conversational STAR flow without labels. Set the scene briefly, '
+        'clarify your specific role, walk through concrete actions (tools, decisions, people), '
+        'then land on a quantified or observable result. 5-8 sentences. '
+        'Use the candidate\'s resume background to personalise it. Real and articulate, not a template.>",\n'
+        '  "model_answer_breakdown": "<3-4 sentences: what STAR elements does this hit? '
+        'Why does the specificity matter to the interviewer? What does this answer signal '
+        'about competence? Teach the pattern so they can apply it to any question.>",\n'
+    )
+
+
 def grade_answer(api_key, provider, model, question, user_answer,
                  category, resume_text, jd_text) -> dict:
     """
-    v4: model_answer is now a complete first-person spoken answer —
-    the exact words a confident candidate would say in the room.
-    Natural, STAR-structured without labels, specific, with a real outcome.
+    v5: category-aware grading engine.
 
-    New field: model_answer_breakdown — explains WHY each part scores well,
-    so the candidate learns the pattern, not just memorises the answer.
+    Opener  → evaluated as an HR recruiter would: narrative arc, experience relevance,
+              motivation/fit, delivery. NO STAR rubric.
+    Closing → evaluated on question quality: role relevance, company research,
+              strategic thinking, interview intelligence. NO STAR rubric.
+    All other categories → full STAR rubric with human-voice model answer.
+
+    Returns a unified dict with:
+      rubric_scores     — 4 named dimensions (different per category type)
+      rubric_labels     — labels for the UI bars
+      what_worked       — specific strengths from the actual answer
+      what_missed       — specific gaps
+      coach_reaction    — warm human 2-3 sentence reaction
+      model_answer      — full first-person spoken answer (category-appropriate)
+      model_answer_breakdown — WHY it scores full marks
+      follow_up_question — natural next question
+      encouragement     — specific 1-2 sentence nudge
     """
     is_ollama  = provider == "ollama"
     resume_ctx = _ollama_trim(resume_text, "grade") if is_ollama else _trim(resume_text, 1000)
     jd_ctx     = _ollama_trim(jd_text,     "grade") if is_ollama else _trim(jd_text, 600)
     max_tok    = _OLLAMA_TOKENS["grade"] if is_ollama else _GRADE_TOKENS
 
-    system = (
-        "You are Alex, a senior interview coach with 15 years of experience "
-        "placing candidates at top companies. You have heard thousands of answers "
-        "and know exactly what separates a 100-point answer from a 60-point one. "
-        "You are warm, direct, and always specific — never generic. "
-        "\n\n"
-        "When you write a model_answer, you write it as if YOU are the candidate — "
-        "speaking naturally in the first person, the way a confident person actually "
-        "talks in an interview room. Think of it as: if I were this candidate and I "
-        "wanted to give the perfect answer, what would I literally say out loud? "
-        "\n\n"
-        "The model_answer must:\n"
-        "- Be written in first person (I, me, my, we)\n"
-        "- Sound conversational and human — no bullet points, no labels like 'Situation:'\n"
-        "- Follow the STAR flow naturally without announcing it\n"
-        "- Include a specific, believable scenario with real-feeling context\n"
-        "- Mention concrete actions, tools, or decisions made\n"
-        "- End with a clear, quantified or observable result\n"
-        "- Be 5-8 sentences — enough to be complete, not so long it feels rehearsed\n"
-        "- Use the candidate's resume background where possible to make it personal\n"
-        "\n"
-        "Return ONLY valid JSON. No markdown. No extra text."
-    )
+    ctype = _category_type(category)
+
+    # Pick the right system prompt, rubric fields, and model answer instructions
+    if ctype == "opener":
+        system        = _opener_system()
+        rubric_json   = _opener_rubric_scores()
+        answer_fields = _opener_prompt_fields()
+        coach_persona = "experienced HR recruiter who has heard thousands of these pitches"
+    elif ctype == "closing":
+        system        = _closing_system()
+        rubric_json   = _closing_rubric_scores()
+        answer_fields = _closing_prompt_fields()
+        coach_persona = "senior hiring manager who judges candidates on the quality of their questions"
+    else:
+        system        = _star_system()
+        rubric_json   = _star_rubric_scores()
+        answer_fields = _star_prompt_fields()
+        coach_persona = "technical interview coach who has coached candidates into top companies"
 
     prompt = (
-        'Grade this interview answer and write a full human-voice model answer.\n\n'
-        'Return ONLY this JSON:\n'
+        f'Grade this interview answer as an {coach_persona}.\n\n'
+        'Return ONLY this JSON (no markdown, no extra text):\n'
         '{\n'
         '  "score": <integer 0-100>,\n'
         '  "grade": "<A|B|C|D|F>",\n'
-        '  "star_scores": {"situation":<0-25>,"task":<0-25>,"action":<0-25>,"result":<0-25>},\n'
+        + rubric_json +
         '  "what_worked": [\n'
-        '    "<specific strength referencing the candidate\'s actual words>",\n'
+        '    "<specific strength referencing the candidate\'s actual words — not generic praise>",\n'
         '    "<another specific strength>"\n'
         '  ],\n'
         '  "what_missed": [\n'
-        '    "<specific gap — what was vague, missing, or weak>",\n'
+        '    "<specific gap or missed opportunity — concrete, not vague>",\n'
         '    "<another gap>"\n'
         '  ],\n'
-        '  "coach_reaction": "<2-3 warm human sentences from Alex reacting to THIS specific '
-        'answer. Use the candidate\'s actual words. Acknowledge what landed before noting what '
-        'to improve. Sound like a real coach who just listened carefully, not an AI report.>",\n'
-        '  "model_answer": "<Write the complete answer as if you ARE the candidate speaking '
-        'in the interview room right now. First person. Conversational. Natural STAR flow without '
-        'labels. Open with the situation — set the scene briefly so the interviewer can picture it. '
-        'Then explain the challenge or what you needed to do. Then walk through what you specifically '
-        'did — decisions made, tools used, people involved. Then land on the result — what changed, '
-        'what improved, what you learned, ideally with a number or observable outcome. '
-        'A brief genuine reflection at the end is fine. 5-8 sentences. '
-        'Use the candidate\'s resume background to personalise it. '
-        'This should feel like something a real, articulate person said — not a template.>",\n'
-        '  "model_answer_breakdown": "<3-4 sentences explaining WHY this answer would score top '
-        'marks. What STAR elements does it hit? Why does the specificity matter to the interviewer? '
-        'What signals does this send about the candidate\'s competence? '
-        'Teach the pattern so they can apply it to any question.>",\n'
-        '  "follow_up_question": "<one natural follow-up the interviewer would ask based on '
-        'what the model answer revealed — something that probes deeper or explores a new angle>",\n'
-        '  "encouragement": "<1-2 sentences of specific encouragement. Find something real in '
-        'their actual answer that showed promise and name it. Then give one concrete thing to '
-        'practise. Not \'great effort!\' — something real and useful.>"\n'
+        '  "coach_reaction": "<2-3 warm, human sentences reacting to THIS specific answer. '
+        'Reference the candidate\'s actual words. Acknowledge what landed. '
+        'Point to the biggest lever for improvement. Sound like a real person who just listened carefully.>",\n'
+        + answer_fields +
+        '  "follow_up_question": "<one natural follow-up the interviewer would ask next, '
+        'based on what the model answer revealed>",\n'
+        '  "encouragement": "<1-2 specific sentences: name something real from their answer '
+        'that showed promise, then give one concrete thing to practise before the real interview.>"\n'
         '}\n\n'
         f'QUESTION: {question}\n'
         f'CATEGORY: {category}\n\n'
         f'CANDIDATE ANSWER:\n{user_answer[:1200]}\n\n'
-        + (f'CANDIDATE RESUME (personalise the model answer using this):\n{resume_ctx}\n\n' if resume_ctx else '')
+        + (f'CANDIDATE RESUME (use to personalise the model answer):\n{resume_ctx}\n\n' if resume_ctx else '')
         + (f'JOB CONTEXT:\n{jd_ctx}\n\n' if jd_ctx else '')
         + 'JSON only:'
     )
 
     raw = _call_with_retry(api_key, provider, model, prompt,
                            system_prompt=system,
-                           temperature=0.72,  # higher temp = more natural-sounding answers
+                           temperature=0.72,
                            max_tokens=max_tok)
     result = _ej(raw)
 
-    # Backward compat — add breakdown if model skipped it
+    # ── Normalise: ensure rubric_scores and rubric_labels always exist ──
+    if "rubric_scores" not in result:
+        # Old model returned star_scores — migrate gracefully
+        ss = result.pop("star_scores", {})
+        if ctype == "opener":
+            result["rubric_scores"] = {
+                "narrative_arc": ss.get("situation", 15),
+                "relevant_experience": ss.get("task", 15),
+                "motivation_fit": ss.get("action", 15),
+                "delivery_confidence": ss.get("result", 15),
+            }
+            result["rubric_labels"] = ["Narrative Arc","Relevant Experience","Motivation & Fit","Delivery & Confidence"]
+        elif ctype == "closing":
+            result["rubric_scores"] = {
+                "role_relevance": ss.get("situation", 15),
+                "company_research": ss.get("task", 15),
+                "strategic_thinking": ss.get("action", 15),
+                "interview_intelligence": ss.get("result", 15),
+            }
+            result["rubric_labels"] = ["Role Relevance","Company Research","Strategic Thinking","Interview Intelligence"]
+        else:
+            result["rubric_scores"] = ss or {"situation":15,"task":15,"action":15,"result":15}
+            result["rubric_labels"] = ["Situation","Task","Action","Result"]
+
+    result.setdefault("rubric_labels", list(result.get("rubric_scores", {}).keys()))
     result.setdefault(
         "model_answer_breakdown",
-        "This answer works because it gives the interviewer a specific, memorable story "
-        "with a clear outcome. Specificity is what separates a B answer from an A — "
-        "vague answers make interviewers nervous, concrete ones build confidence."
+        "A strong answer gives the interviewer something specific and memorable. "
+        "Specificity builds confidence — vague answers create doubt."
     )
+    # Keep star_scores for backward compat (report page uses it)
+    if "star_scores" not in result:
+        scores = list(result["rubric_scores"].values())
+        keys   = ["situation","task","action","result"]
+        result["star_scores"] = {k: (scores[i] if i < len(scores) else 15)
+                                 for i, k in enumerate(keys)}
     return result
 
 
@@ -519,17 +691,49 @@ def get_question_tip(api_key, provider, model, question, category,
     resume_ctx = _ollama_trim(resume_text, "tip") if is_ollama else _trim(resume_text, 1200)
     jd_ctx     = _ollama_trim(jd_text,     "tip") if is_ollama else _trim(jd_text, 800)
     max_tok    = _OLLAMA_TOKENS["tip"] if is_ollama else _TIPS_TOKENS
+    ctype      = _category_type(category)
 
-    sys = (
-        "You are Alex, a senior interview coach. Give a quick, specific tip on how to "
-        "answer this question. Sound like a real human — direct, warm. Use phrases like "
-        "'what interviewers are really looking for here is...' or "
-        "'the mistake most people make with this one is...'. "
-        "Reference the candidate's background specifically. 3-5 sentences."
-    )
+    if ctype == "opener":
+        sys = (
+            "You are Alex, a senior HR recruiter and interview coach. "
+            "Give a quick, warm tip on how to nail a \'Tell me about yourself\' opener. "
+            "Focus on: the past→present→future narrative arc, how to connect experience to "
+            "THIS specific role, how to sound genuine not rehearsed, and the right length (60-90s). "
+            "Reference the candidate\'s actual background. 3-5 sentences. Sound like a real coach."
+        )
+        tip_instruction = (
+            "Give a specific tip on how to structure and deliver a compelling self-introduction "
+            "for this role. Focus on narrative arc, motivation authenticity, and what recruiters "
+            "actually pay attention to in the first 90 seconds.\n"
+        )
+    elif ctype == "closing":
+        sys = (
+            "You are Alex, a senior hiring manager and interview coach. "
+            "Give a quick tip on how to ask great questions at the end of an interview. "
+            "What makes a question impressive vs forgettable? What topics to target, what to avoid. "
+            "Reference the role they\'re going for specifically. 3-5 sentences."
+        )
+        tip_instruction = (
+            "Give a specific tip on what great candidate questions look like for this role. "
+            "What should they ask about? What signals do sharp questions send? "
+            "What common mistakes do candidates make here?\n"
+        )
+    else:
+        sys = (
+            "You are Alex, a senior interview coach. Give a quick, specific tip on how to "
+            "answer this question well. Sound like a real human — direct, warm. Use phrases like "
+            "\'what interviewers are really looking for here is...\' or "
+            "\'the mistake most people make with this one is...\'. "
+            "Reference the candidate\'s background specifically. 3-5 sentences."
+        )
+        tip_instruction = (
+            "Give a specific, personalised coaching tip for this question. "
+            "Focus on what makes an answer go from good to great.\n"
+        )
+
     prompt = (
         f"Question: {question}\nCategory: {category}\n\n"
-        "Give a specific, personalised coaching tip for this question.\n"
+        + tip_instruction
         + _brevity(provider, 70) +
         "\n\nCANDIDATE RESUME:\n" + resume_ctx +
         "\n\nJOB:\n" + jd_ctx

@@ -401,12 +401,42 @@ def _launch_session(plan):
 
 def score_bar(label, val, max_val=25):
     pct = int(val / max_val * 100)
+    color = "#2d7a4f" if pct >= 80 else "#d4813a" if pct >= 50 else "#c0392b"
     st.markdown(f"""
     <div class="star-row">
       <span class="star-label">{label}</span>
-      <div class="star-track"><div class="star-fill" style="width:{pct}%"></div></div>
-      <span class="star-val">{val}/{max_val}</span>
+      <div class="star-track">
+        <div class="star-fill" style="width:{pct}%;background:{color}"></div>
+      </div>
+      <span class="star-val" style="color:{color}">{val}/{max_val}</span>
     </div>""", unsafe_allow_html=True)
+
+
+def rubric_breakdown(grade_result: dict, category: str):
+    """Render the rubric bars with correct labels for the category type."""
+    cat_lower = category.lower()
+    if cat_lower == "opener":
+        heading  = "🧭 NARRATIVE RUBRIC"
+        subtitle = "Evaluated as an HR recruiter would assess your pitch"
+    elif cat_lower == "closing":
+        heading  = "🔍 QUESTION QUALITY RUBRIC"
+        subtitle = "Evaluated on how a senior hiring manager judges candidate questions"
+    else:
+        heading  = "⭐ STAR RUBRIC"
+        subtitle = "Evaluated on Situation · Task · Action · Result"
+
+    st.markdown(
+        f"<div style='margin:12px 0 3px;font-weight:700;color:var(--ink-mid);"
+        f"font-size:0.85rem'>{heading}</div>"
+        f"<div style='font-size:0.72rem;color:var(--ink-lt);margin-bottom:8px'>{subtitle}</div>",
+        unsafe_allow_html=True
+    )
+    rubric  = grade_result.get("rubric_scores", {})
+    labels  = grade_result.get("rubric_labels", list(rubric.keys()))
+    keys    = list(rubric.keys())
+    for i, key in enumerate(keys):
+        label = labels[i] if i < len(labels) else key.replace("_", " ").title()
+        score_bar(label, rubric.get(key, 0))
 
 
 def rpt_bar(label, score):
@@ -1071,14 +1101,8 @@ def page_session():
               {g.get('coach_reaction','')}
             </div>""", unsafe_allow_html=True)
 
-        # STAR breakdown
-        st.markdown("<div style='margin:12px 0 6px;font-weight:600;color:var(--ink-mid);"
-                    "font-size:0.85rem'>STAR BREAKDOWN</div>", unsafe_allow_html=True)
-        sb = g.get("star_scores", {})
-        score_bar("Situation", sb.get("situation", 0))
-        score_bar("Task",      sb.get("task", 0))
-        score_bar("Action",    sb.get("action", 0))
-        score_bar("Result",    sb.get("result", 0))
+        # Dynamic rubric breakdown (STAR for behavioral, custom for Opener/Closing)
+        rubric_breakdown(g, q_cat)
 
         # What worked / missed
         st.markdown("<br>", unsafe_allow_html=True)

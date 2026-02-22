@@ -4,7 +4,23 @@ Warm, editorial UI. Playfair Display + DM Sans. Teal & amber on cream.
 """
 import streamlit as st, sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
+
+# ── Path setup — must happen before src imports ───────────────────
+_ROOT = Path(__file__).parent
+sys.path.insert(0, str(_ROOT))
+
+# ── Core imports — fail loudly here rather than mid-page ─────────
+try:
+    from src.core.llm import (
+        PROVIDER_MODELS, HELP_LINKS, verify_connection, call_llm,
+        get_ollama_models, build_session_plan, build_field_plan,
+        grade_answer, coach_followup, get_question_tip,
+        build_session_report, free_chat, transcribe_audio,
+    )
+    from src.utils.file_parser import extract_text, clean
+except ImportError as _e:
+    st.error(f"Import error: {_e}. Check that src/ folder is committed to your repo.")
+    st.stop()
 
 st.set_page_config(
     page_title="Coach Alex — Interview Coach AI",
@@ -36,6 +52,8 @@ DEFAULTS = {
     "quick_field": "",
     "quick_exp": "Mid Level (3–5 yrs)",
     "setup_mode_radio": None,
+    "voice_transcript": "",    # last voice→text result
+    "voice_recording_b64": "", # raw b64 audio waiting to transcribe
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state: st.session_state[k] = v
@@ -67,7 +85,9 @@ html, body, [class*="css"] {
 }
 
 /* Hide Streamlit chrome */
-footer { visibility: hidden; } /* Deploy button restored — header visible */
+footer { visibility: hidden; }
+#MainMenu { visibility: hidden; }
+/* Deploy button lives in stToolbar — kept visible for Streamlit Cloud */
 
 /* ── Sidebar ──────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
@@ -351,14 +371,8 @@ hr { border-color: rgba(13,115,119,0.12); margin: 1.5rem 0; }
 
 
 # ══════════════════════════════════════════════════════════════════
-# IMPORTS (after path setup)
+# IMPORTS — moved to top of file for Streamlit Cloud compatibility
 # ══════════════════════════════════════════════════════════════════
-from src.core.llm import (
-    PROVIDER_MODELS, HELP_LINKS, verify_connection, call_llm, get_ollama_models,
-    build_session_plan, build_field_plan, grade_answer, coach_followup,
-    get_question_tip, build_session_report, free_chat,
-)
-from src.utils.file_parser import extract_text, clean
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -799,7 +813,7 @@ def page_setup():
         with col_a:
             # Popular field suggestions
             FIELD_SUGGESTIONS = {
-                "💻 Technology": ["Software Engineer", "Data Scientist", "Product Manager",
+                "💻 Technology": ["Software Engineer", "Data Analyst", "Data Scientist", "Product Manager",
                                   "DevOps Engineer", "UX Designer", "Cybersecurity Analyst",
                                   "ML Engineer", "Cloud Architect"],
                 "📊 Business": ["Business Analyst", "Project Manager", "Strategy Consultant",
@@ -1078,10 +1092,35 @@ def page_session():
             for m in g.get("what_missed", []):
                 st.markdown(f'<div class="fb-amber">→ {m}</div>', unsafe_allow_html=True)
 
-        # Model answer
-        with st.expander("📖 See a strong model answer"):
-            st.markdown(f'<div class="fb-model">{g.get("model_answer","")}</div>',
-                        unsafe_allow_html=True)
+        # Model answer — human voice + breakdown
+        with st.expander("📖 See a full model answer — how you'd actually say it"):
+            model_ans = g.get("model_answer", "")
+            breakdown = g.get("model_answer_breakdown", "")
+            if model_ans:
+                st.markdown("""
+                <div style="font-size:0.72rem;font-weight:700;color:var(--teal);
+                            text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">
+                    💬 How a top candidate would say it
+                </div>""", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="fb-model" style="font-size:1rem;line-height:1.75;'
+                    f'border-left:3px solid var(--teal);padding-left:14px;'
+                    f'font-style:italic;color:var(--ink)">{model_ans}</div>',
+                    unsafe_allow_html=True
+                )
+            if breakdown:
+                st.markdown("""
+                <div style="margin-top:16px;font-size:0.72rem;font-weight:700;
+                            color:var(--amber);text-transform:uppercase;
+                            letter-spacing:0.08em;margin-bottom:8px">
+                    🧠 Why this answer scores full marks
+                </div>""", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div style="font-size:0.88rem;line-height:1.65;color:var(--ink-mid);'
+                    f'background:rgba(212,129,58,0.06);border-radius:8px;'
+                    f'padding:12px 14px">{breakdown}</div>',
+                    unsafe_allow_html=True
+                )
 
         # Follow-up question preview
         fq = g.get("follow_up_question","")
@@ -1177,18 +1216,117 @@ def page_session():
             <em>What makes a great answer: {q_wgl}</em>
         </div>""", unsafe_allow_html=True)
 
-    # Answer input
-    st.markdown("**✍️ Your Answer** — use STAR: Situation → Task → Action → Result",
-                unsafe_allow_html=False)
-    ans = st.text_area("Answer", height=180, label_visibility="collapsed",
-                        placeholder="Type your answer here. Aim for 2-4 minutes of speaking. "
-                                    "Be specific — real examples beat generic statements every time.",
-                        key=f"ans_{idx}")
+    # ── Answer input — type OR speak ────────────────────────────────
+    st.markdown("""
+    <div style="font-size:0.85rem;font-weight:700;color:var(--ink);
+                margin-bottom:6px;margin-top:4px">
+        ✍️ Your Answer
+        <span style="font-weight:400;color:var(--ink-lt);font-size:0.78rem;">
+         — type below, or record your voice using the mic
+        </span>
+    </div>""", unsafe_allow_html=True)
+
+    # ── Tab switcher: Type / Voice ────────────────────────────────
+    ans_tab, voice_tab = st.tabs(["⌨️  Type Answer", "🎙️  Record Voice"])
+
+    with ans_tab:
+        typed_val = st.session_state.get("voice_transcript", "")
+        ans = st.text_area(
+            "Answer",
+            value=typed_val,
+            height=180,
+            label_visibility="collapsed",
+            placeholder="Type your answer here. Aim for 2-4 minutes of speaking. "
+                        "Be specific — real examples beat generic statements every time.",
+            key=f"ans_{idx}",
+        )
+        if typed_val and ans:
+            st.session_state.voice_transcript = ""
+
+    with voice_tab:
+        provider_ok = _prov() in ("groq", "openai", "ollama")
+        if not provider_ok:
+            st.warning(
+                f"Voice recording needs Groq (free), OpenAI, or Ollama. "
+                f"Your current provider ({_prov()}) doesn't support audio transcription. "
+                "Switch to Groq for instant free transcription."
+            )
+        else:
+            provider_label = {"groq": "Groq Whisper (free)", "openai": "OpenAI Whisper",
+                              "ollama": "Local Whisper"}.get(_prov(), _prov())
+
+            st.markdown(f"""
+            <div style="font-size:0.82rem;color:var(--ink-lt);margin-bottom:12px;
+                        padding:8px 12px;border-left:3px solid rgba(13,115,119,0.35);
+                        background:rgba(13,115,119,0.04);border-radius:0 8px 8px 0">
+                🎙️ Click the mic below to record your answer. When done, click
+                <b>🎙️ Transcribe</b> — your speech will be converted to text
+                by <b>{provider_label}</b> and moved to the Type tab for review.
+            </div>""", unsafe_allow_html=True)
+
+            # ── st.audio_input — native Streamlit widget (1.41+) ──────────
+            # Returns an UploadedFile (WAV bytes) or None. No JS bridge needed.
+            audio_input = st.audio_input(
+                "Record your answer",
+                key=f"audio_input_{idx}",
+                label_visibility="collapsed",
+            )
+
+            if audio_input is not None:
+                # Show a success indicator
+                st.markdown("""
+                <div style="padding:8px 12px;border-radius:8px;margin-top:6px;
+                            background:rgba(45,122,79,0.1);font-size:0.82rem;
+                            color:#2d7a4f;font-weight:600">
+                    ✅ Recording captured — click Transcribe below to convert to text
+                </div>""", unsafe_allow_html=True)
+
+                t1, t2 = st.columns([2, 1])
+                with t1:
+                    do_transcribe = st.button(
+                        "🎙️ Transcribe & Use This Answer",
+                        type="primary",
+                        use_container_width=True,
+                        key=f"transcribe_{idx}",
+                        help="Converts your recording to text and fills the answer box",
+                    )
+                with t2:
+                    st.markdown(
+                        "<div style='font-size:0.72rem;color:var(--ink-lt);padding-top:10px'>"
+                        "⚡ Powered by Whisper AI</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                if do_transcribe:
+                    try:
+                        audio_bytes = audio_input.read()
+                        with st.spinner("🎙️ Transcribing your answer with Whisper…"):
+                            transcript = transcribe_audio(audio_bytes, _api(), _prov())
+                        if transcript and transcript.strip():
+                            st.session_state.voice_transcript = transcript.strip()
+                            st.success("✅ Done! Switch to the Type tab — your answer is ready to submit.")
+                            st.rerun()
+                        else:
+                            st.error("Transcription returned empty — please try recording again.")
+                    except Exception as e:
+                        st.error(f"Transcription failed: {e}")
+            else:
+                st.markdown("""
+                <div style="padding:10px 14px;border-radius:8px;margin-top:4px;
+                            background:rgba(0,0,0,0.03);font-size:0.8rem;color:var(--ink-lt)">
+                    👆 Click the mic icon above to start recording. Click again to stop.
+                    Your recording will appear here for review before transcribing.
+                </div>""", unsafe_allow_html=True)
+
+    # ── Final answer text ─────────────────────────────────────────
+    final_ans = ans.strip() if ans.strip() else ""
+
+
 
     a1, a2, a3 = st.columns([3,1,1])
     with a1:
         submit = st.button("✅ Submit Answer", type="primary", use_container_width=True,
-                           disabled=not ans.strip())
+                           disabled=not final_ans)
     with a2:
         if st.button("⏭️ Skip", use_container_width=True):
             st.session_state.current_q_idx += 1
@@ -1202,18 +1340,19 @@ def page_session():
             st.session_state.current_q_idx = 0
             _go("setup")
 
-    if submit and ans.strip():
+    if submit and final_ans:
         with st.spinner("Alex is reviewing your answer…"):
             try:
                 grade = grade_answer(
                     _api(), _prov(), _model(),
-                    q_text, ans, q_cat,
+                    q_text, final_ans, q_cat,
                     st.session_state.resume_text, st.session_state.jd_text)
                 entry = {"question": q_text, "category": q_cat,
-                         "answer": ans, "grade": grade}
+                         "answer": final_ans, "grade": grade}
                 st.session_state.session_data.append(entry)
                 st.session_state.last_grade = grade
                 st.session_state.show_tip   = False
+                st.session_state.voice_transcript = ""
                 st.rerun()
             except Exception as e:
                 st.error(f"Grading failed: {e}")
